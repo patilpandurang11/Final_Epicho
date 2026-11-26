@@ -1,4 +1,3 @@
- HEAD
 # EpiCho — Discover. Create. Cook. Connect.
 
 EpiCho is a full-stack, AI-powered culinary social networking platform built with **Next.js 16 (App Router)**, **React 19**, **Tailwind CSS + shadcn/ui**, **FastAPI**, **PostgreSQL 16**, **Redis**, and **Google Gemini AI**.
