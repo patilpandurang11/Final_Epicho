@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+ HEAD
 # EpiCho — Discover. Create. Cook. Connect.
 
 EpiCho is a full-stack, AI-powered culinary social networking platform built with **Next.js 16 (App Router)**, **React 19**, **Tailwind CSS + shadcn/ui**, **FastAPI**, **PostgreSQL 16**, **Redis**, and **Google Gemini AI**.
@@ -77,6 +77,3 @@ npx tsc --noEmit && npm run build
 | S3 / Cloudflare R2 / Cloudinary | Production media & CDN storage | `STORAGE_TYPE`, `S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `CDN_BASE_URL` |
 | Managed PostgreSQL 16 & Redis 7 | Persistent database & distributed rate-limiting | `DATABASE_URL`, `REDIS_URL` |
 =======
-# Final_Epicho
-An AI-powered food community platform for sharing, discovering, customizing and planning recipes.
->>>>>>> 65946820fbc0effd5da7d1563dbd4a2095d3f0f4
