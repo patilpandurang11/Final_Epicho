@@ -32,6 +32,16 @@ type CommentData = {
   content: string;
 };
 
+type SavedCollectionSummary = {
+  collection_id: string;
+  name: string;
+};
+
+type CollectionItemSummary = {
+  item_id: string;
+  post_id?: string | null;
+};
+
 export default function PostDetailPage() {
   const params = useParams();
   const postId = params?.postId as string;
@@ -40,6 +50,12 @@ export default function PostDetailPage() {
   const [comments, setComments] = useState<CommentData[]>([]);
   const [commentText, setCommentText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackError, setFeedbackError] = useState(false);
+  const [collections, setCollections] = useState<SavedCollectionSummary[]>([]);
+  const [collectionId, setCollectionId] = useState("");
+  const [collectionItemId, setCollectionItemId] = useState<string | null>(null);
+  const [collectionItemLoading, setCollectionItemLoading] = useState(false);
 
   useEffect(() => {
     if (!postId) return;
@@ -54,6 +70,48 @@ export default function PostDetailPage() {
       .catch((requestError: Error) => setError(requestError.message));
   }, [postId]);
 
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    apiRequest<SavedCollectionSummary[]>("/posts/collections")
+      .then((result) => {
+        if (active) setCollections(result);
+      })
+      .catch((requestError: Error) => {
+        if (active) {
+          setFeedback(requestError.message);
+          setFeedbackError(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  const currentPostId = post?.post_id;
+  useEffect(() => {
+    if (!collectionId || !currentPostId || !user) return;
+    let active = true;
+    apiRequest<CollectionItemSummary[]>(`/posts/collections/${collectionId}/items`)
+      .then((items) => {
+        if (!active) return;
+        const savedItem = items.find((item) => item.post_id === currentPostId);
+        setCollectionItemId(savedItem?.item_id ?? null);
+      })
+      .catch((requestError: Error) => {
+        if (active) {
+          setFeedback(requestError.message);
+          setFeedbackError(true);
+        }
+      })
+      .finally(() => {
+        if (active) setCollectionItemLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [collectionId, currentPostId, user]);
+
   const toggleLike = async () => {
     if (!post) return;
     try {
@@ -62,8 +120,43 @@ export default function PostDetailPage() {
         { method: "POST" },
       );
       setPost({ ...post, has_liked: result.liked, likes_count: result.likes_count });
+      setFeedbackError(false);
     } catch (requestError) {
-      setError((requestError as Error).message);
+      setFeedback((requestError as Error).message);
+      setFeedbackError(true);
+    }
+  };
+
+  const toggleCollectionItem = async () => {
+    if (!post) return;
+    setFeedback(null);
+    setFeedbackError(false);
+    try {
+      if (collectionItemId) {
+        await apiRequest(
+          `/posts/collections/${collectionId}/items/${collectionItemId}`,
+          { method: "DELETE" },
+        );
+        setCollectionItemId(null);
+        setFeedback("Post removed from the collection.");
+        return;
+      }
+      const result = await apiRequest<{ item_id: string; already_saved: boolean }>(
+        `/posts/collections/${collectionId}/items`,
+        {
+          method: "POST",
+          body: JSON.stringify({ post_id: post.post_id }),
+        },
+      );
+      setCollectionItemId(result.item_id);
+      setFeedback(
+        result.already_saved
+          ? "This post is already in the selected collection."
+          : "Post added to the collection.",
+      );
+    } catch (requestError) {
+      setFeedback((requestError as Error).message);
+      setFeedbackError(true);
     }
   };
 
@@ -141,6 +234,52 @@ export default function PostDetailPage() {
               <Share2 /> {post.shares_count}
             </Button>
           </div>
+          {user && (
+            <div className="space-y-2 rounded-xl border border-stone-200 p-3">
+              <label htmlFor="post-collection" className="text-xs font-bold">Save to collection</label>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  id="post-collection"
+                  aria-label="Select collection"
+                  value={collectionId}
+                  onChange={(event) => {
+                    const selectedId = event.target.value;
+                    setCollectionId(selectedId);
+                    setCollectionItemId(null);
+                    setCollectionItemLoading(Boolean(selectedId));
+                    setFeedback(null);
+                    setFeedbackError(false);
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Select a collection</option>
+                  {collections.map((collection) => (
+                    <option key={collection.collection_id} value={collection.collection_id}>
+                      {collection.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!collectionId || collectionItemLoading}
+                  onClick={toggleCollectionItem}
+                >
+                  {collectionItemLoading ? "Checking..." : collectionItemId ? "Remove from collection" : "Add to collection"}
+                </Button>
+              </div>
+              {collections.length === 0 && <p className="text-xs text-stone-600">Create a collection from your profile first.</p>}
+              {feedback && (
+                <p
+                  role={feedbackError ? "alert" : "status"}
+                  className={`text-xs ${feedbackError ? "text-red-700" : "text-emerald-800"}`}
+                >
+                  {feedback}
+                </p>
+              )}
+            </div>
+          )}
+          {feedback && !user && <p role="status" className="text-sm text-emerald-800">{feedback}</p>}
         </CardContent>
       </Card>
 

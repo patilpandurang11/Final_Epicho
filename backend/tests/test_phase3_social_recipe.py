@@ -436,6 +436,22 @@ def test_recommendations_follow_lists_collections_and_serving_adjustment(monkeyp
     )
     assert items.status_code == 200
     assert len(items.json()) == 1
+    unauthorized_item_read = client.get(
+        f"/api/v1/posts/collections/{collection_id}/items",
+        headers=owner["headers"],
+    )
+    unauthorized_item_add = client.post(
+        f"/api/v1/posts/collections/{collection_id}/items",
+        headers=owner["headers"],
+        json={"post_id": post_id},
+    )
+    unauthorized_item_remove = client.delete(
+        f"/api/v1/posts/collections/{collection_id}/items/{items.json()[0]['item_id']}",
+        headers=owner["headers"],
+    )
+    assert unauthorized_item_read.status_code == 404
+    assert unauthorized_item_add.status_code == 404
+    assert unauthorized_item_remove.status_code == 404
     removed = client.delete(
         f"/api/v1/posts/collections/{collection_id}/items/{items.json()[0]['item_id']}",
         headers=follower["headers"],
@@ -443,9 +459,9 @@ def test_recommendations_follow_lists_collections_and_serving_adjustment(monkeyp
     assert removed.status_code == 200
     deleted = client.delete(
         f"/api/v1/posts/collections/{collection_id}",
-        headers=follower["headers"],
+        headers=owner["headers"],
     )
-    assert deleted.status_code == 200
+    assert deleted.status_code == 404
 
     other_owner = register_user(monkeypatch, "collection_intruder")
     unauthorized = client.patch(
@@ -454,6 +470,11 @@ def test_recommendations_follow_lists_collections_and_serving_adjustment(monkeyp
         json={"name": "Not yours"},
     )
     assert unauthorized.status_code == 404
+    deleted = client.delete(
+        f"/api/v1/posts/collections/{collection_id}",
+        headers=follower["headers"],
+    )
+    assert deleted.status_code == 200
 
     recipe = client.post(
         "/api/v1/recipes",
@@ -481,6 +502,65 @@ def test_recommendations_follow_lists_collections_and_serving_adjustment(monkeyp
         quantities = [item["quantity"] for item in adjusted.json()["ingredients"]]
         assert quantities == expected
         assert adjusted.json()["quantity_disclaimer"]
+
+
+def test_recommendations_support_interest_signals_and_empty_history_pagination(monkeypatch):
+    author = register_user(monkeypatch, "interest_author")
+    reader = register_user(monkeypatch, "interest_reader")
+
+    updated_profile = client.put(
+        "/api/v1/auth/me",
+        headers=reader["headers"],
+        json={"cuisine_interests": ["Thai"]},
+    )
+    assert updated_profile.status_code == 200, updated_profile.text
+
+    thai_post = client.post(
+        "/api/v1/posts",
+        headers=author["headers"],
+        json={
+            "caption": "A Thai-inspired supper",
+            "dish_name": "Noodles",
+            "hashtags": ["THAI"],
+        },
+    )
+    unrelated_post = client.post(
+        "/api/v1/posts",
+        headers=author["headers"],
+        json={
+            "caption": "A classic Italian supper",
+            "dish_name": "Italian Pasta",
+            "hashtags": ["Italian"],
+        },
+    )
+    assert thai_post.status_code == 200, thai_post.text
+    assert unrelated_post.status_code == 200, unrelated_post.text
+
+    recommended = client.get(
+        "/api/v1/posts?sort=recommended&limit=1&offset=0",
+        headers=reader["headers"],
+    )
+    assert recommended.status_code == 200, recommended.text
+    assert recommended.json()[0]["post_id"] == thai_post.json()["post_id"]
+
+    no_interest_user = register_user(monkeypatch, "empty_interest")
+    first_page = client.get(
+        "/api/v1/posts?sort=recommended&limit=1&offset=0",
+        headers=no_interest_user["headers"],
+    )
+    repeated_first_page = client.get(
+        "/api/v1/posts?sort=recommended&limit=1&offset=0",
+        headers=no_interest_user["headers"],
+    )
+    second_page = client.get(
+        "/api/v1/posts?sort=recommended&limit=1&offset=1",
+        headers=no_interest_user["headers"],
+    )
+    assert first_page.status_code == 200, first_page.text
+    assert repeated_first_page.status_code == 200, repeated_first_page.text
+    assert second_page.status_code == 200, second_page.text
+    assert first_page.json()[0]["post_id"] == repeated_first_page.json()[0]["post_id"]
+    assert first_page.json()[0]["post_id"] != second_page.json()[0]["post_id"]
 
 
 def test_review_feedback_is_unique_and_cannot_be_self_manipulated(monkeypatch):

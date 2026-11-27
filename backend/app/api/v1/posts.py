@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import case, desc, func
+from sqlalchemy import case, desc, func, literal
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -218,8 +218,12 @@ def get_posts(
                 score_cases.append(
                     case(
                         (
-                            Post.ingredient_tags.any(term)
-                            | Post.hashtags.any(term)
+                            func.array_to_string(Post.ingredient_tags, ",").ilike(
+                                f"%{term}%"
+                            )
+                            | func.array_to_string(Post.hashtags, ",").ilike(
+                                f"%{term}%"
+                            )
                             | func.coalesce(Post.dish_name, "").ilike(f"%{term}%")
                             | func.coalesce(Post.technique, "").ilike(f"%{term}%"),
                             1,
@@ -228,7 +232,7 @@ def get_posts(
                     )
                 )
             interest_score_expr = (
-                sum(score_cases, start=0) if score_cases else func.literal(0)
+                sum(score_cases, start=literal(0)) if score_cases else literal(0)
             )
             query = query.order_by(
                 desc(case((Post.author_id.in_(followed_ids), 1), else_=0)),

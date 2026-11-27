@@ -4,27 +4,35 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+
+const PAGE_SIZE = 20;
 
 export default function FollowingPage() {
   const params = useParams();
   const username = params?.username as string;
   const [users, setUsers] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!username) return;
     apiRequest(`/posts/profile/${encodeURIComponent(username)}`)
-      .then((profile) => apiRequest(`/posts/following/${profile.user_id}?limit=50&offset=0`))
+      .then((profile) => apiRequest(`/posts/following/${profile.user_id}?limit=${PAGE_SIZE}&offset=${offset}`))
       .then(setUsers)
-      .catch((requestError: Error) => setError(requestError.message));
-  }, [username]);
+      .catch((requestError: Error) => setError(requestError.message))
+      .finally(() => setLoading(false));
+  }, [username, offset]);
 
   if (error) return <p role="alert" className="mx-auto max-w-3xl px-4 py-12 text-center text-red-700">{error}</p>;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">
       <h1 className="mb-5 text-2xl font-bold">Following</h1>
-      {users.length === 0 ? (
+      {loading ? (
+        <p role="status" className="text-sm text-stone-600">Loading followed accounts...</p>
+      ) : users.length === 0 ? (
         <p className="text-sm text-stone-600">Not following any accounts yet.</p>
       ) : (
         <div className="space-y-2">
@@ -47,6 +55,34 @@ export default function FollowingPage() {
               </div>
             </Link>
           ))}
+        </div>
+      )}
+      {!loading && (
+        <div className="mt-5 flex justify-between">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={offset === 0}
+            onClick={() => {
+              setError(null);
+              setOffset((value) => Math.max(0, value - PAGE_SIZE));
+              setLoading(true);
+            }}
+          >
+            Previous
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={users.length < PAGE_SIZE}
+            onClick={() => {
+              setError(null);
+              setOffset((value) => value + PAGE_SIZE);
+              setLoading(true);
+            }}
+          >
+            Next
+          </Button>
         </div>
       )}
     </main>
