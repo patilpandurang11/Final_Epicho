@@ -23,6 +23,7 @@ export default function RecipesCatalogPage() {
   const [search, setSearch] = useState("");
   const [selectedCuisine, setSelectedCuisine] = useState("All");
   const [selectedDiet, setSelectedDiet] = useState("All");
+  const [sort, setSort] = useState("recent");
 
   const fetchRecipes = async () => {
     setLoading(true);
@@ -31,6 +32,7 @@ export default function RecipesCatalogPage() {
       if (selectedCuisine !== "All") params.append("cuisine", selectedCuisine);
       if (selectedDiet !== "All") params.append("diet", selectedDiet);
       if (search) params.append("search", search);
+      params.append("sort", sort);
 
       const data = await apiRequest(`/recipes?${params.toString()}`);
       setRecipes(data);
@@ -43,7 +45,7 @@ export default function RecipesCatalogPage() {
 
   useEffect(() => {
     fetchRecipes();
-  }, [selectedCuisine, selectedDiet]);
+  }, [selectedCuisine, selectedDiet, sort]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,6 +126,14 @@ export default function RecipesCatalogPage() {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-2 text-xs font-bold whitespace-nowrap">
+          Sort:
+          <select value={sort} onChange={(event) => setSort(event.target.value)} className="rounded-lg border border-stone-200 bg-white px-2 py-1.5">
+            <option value="recent">Newest</option>
+            <option value="popular">Most viewed</option>
+            <option value="rating">Top rated</option>
+          </select>
+        </label>
       </div>
 
       {/* Recipe Cards Grid */}
@@ -171,6 +181,7 @@ export default function RecipesCatalogPage() {
                       {(rec.prep_time_mins || 15) + (rec.cook_time_mins || 20)} Mins
                     </span>
                     <span>{rec.servings} Servings</span>
+                    <span>{rec.average_rating ? `★ ${rec.average_rating} (${rec.review_count})` : "New"}</span>
                   </div>
 
                   <h3 className="font-extrabold text-[#0F172A] text-base group-hover:text-[#9A3412] transition-colors line-clamp-1">

@@ -15,11 +15,23 @@ from app.models.recipe import (
     RecipeStep,
     RecipeNutrition,
     RecipeReview,
+    ReviewFeedback,
     RecipeVersion,
     HeritageRecipe,
     AIRequest,
 )
-from app.models.social import Post, PostMedia, Comment, Like, Follow, Save
+from app.models.social import (
+    Post,
+    PostMedia,
+    Comment,
+    Like,
+    Follow,
+    Save,
+    PostSave,
+    PostShare,
+    SavedCollection,
+    CollectionItem,
+)
 from app.models.reels import Reel, ReelLike, ReelSave, ReelComment, ReelView
 from app.models.planning import Ingredient, MealPlan, MealPlanItem, GroceryList, GroceryListItem, PantryItem
 from app.models.business import (
@@ -38,9 +50,10 @@ from app.models.admin import ModerationReport, AuditLog, Notification, SupportTi
 __all__ = [
     "AuthUser", "Role", "AdminPermission", "RolePermission", "UserRole", "UserAccount", "UserProfile",
     "UserSession", "AdminInvitation",
-    "Recipe", "RecipeIngredient", "RecipeStep", "RecipeNutrition", "RecipeReview", "RecipeVersion",
+    "Recipe", "RecipeIngredient", "RecipeStep", "RecipeNutrition", "RecipeReview", "ReviewFeedback", "RecipeVersion",
     "HeritageRecipe", "AIRequest",
-    "Post", "PostMedia", "Comment", "Like", "Follow", "Save",
+    "Post", "PostMedia", "Comment", "Like", "Follow", "Save", "PostSave", "PostShare",
+    "SavedCollection", "CollectionItem",
     "Reel", "ReelLike", "ReelSave", "ReelComment", "ReelView",
     "Ingredient", "MealPlan", "MealPlanItem", "GroceryList", "GroceryListItem", "PantryItem",
     "BusinessProfile", "MenuItem", "BusinessReview", "Promotion", "NutritionistProfile",

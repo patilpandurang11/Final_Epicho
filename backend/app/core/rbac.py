@@ -1,4 +1,5 @@
 from typing import List, Optional, Set
+from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.cache import cache
 from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.models.user import Role, UserAccount, UserRole
+from app.models.user import Role, UserAccount, UserRole, UserSession
 
 security = HTTPBearer(auto_error=False)
 
@@ -34,11 +35,12 @@ ROLE_PERMISSION_MAP = {
     "guest": {"recipe.view", "reel.view", "ai.generate"},
     "registered": set(BASE_USER_PERMISSIONS),
     "primary": set(BASE_USER_PERMISSIONS),
-    "premium": set(BASE_USER_PERMISSIONS) | {"ai.unlimited", "ai.fusion", "mealplan.ai"},
     "creator": set(BASE_USER_PERMISSIONS) | {"creator.analytics", "creator.collections"},
     "business": set(BASE_USER_PERMISSIONS) | {"business.manage_own", "business.analytics"},
     "restaurant": set(BASE_USER_PERMISSIONS) | {"business.manage_own", "business.analytics"},
     "nutritionist": set(BASE_USER_PERMISSIONS) | {"consultation.provide", "nutrition.publish"},
+    "chef": set(BASE_USER_PERMISSIONS) | {"creator.analytics", "creator.collections", "consultation.provide"},
+    "food_brand": set(BASE_USER_PERMISSIONS) | {"business.manage_own", "business.analytics"},
     "critic": set(BASE_USER_PERMISSIONS) | {"critic.review_official", "ranking.critic_weight"},
     "chefexpert": set(BASE_USER_PERMISSIONS) | {"creator.analytics", "consultation.provide"},
     # 9 Administrative Staff Roles
@@ -66,21 +68,17 @@ ADMIN_ROLE_NAMES = {
 
 def get_user_role_names(user: UserAccount, db: Session) -> Set[str]:
     names: Set[str] = set()
-    if user.account_tier:
-        names.add(user.account_tier.lower())
     if user.role and user.role.role_name:
         names.add(user.role.role_name.lower())
     extra_roles = (
-        db.query(Role.role_name, Role.tier)
+        db.query(Role.role_name)
         .join(UserRole, UserRole.role_id == Role.role_id)
         .filter(UserRole.user_id == user.user_id)
         .all()
     )
-    for role_name, tier in extra_roles:
+    for (role_name,) in extra_roles:
         if role_name:
             names.add(role_name.lower())
-        if tier:
-            names.add(tier.lower())
     return names
 
 
@@ -92,25 +90,46 @@ def get_user_permissions(user: Optional[UserAccount], db: Session) -> Set[str]:
     for rname in role_names:
         if rname in ROLE_PERMISSION_MAP:
             perms |= ROLE_PERMISSION_MAP[rname]
-    if "admin" in role_names and not (role_names & ADMIN_ROLE_NAMES):
-        perms |= ROLE_PERMISSION_MAP["super_admin"]
     return perms
+
+
+def _session_user(
+    credentials: Optional[HTTPAuthorizationCredentials],
+    db: Session,
+) -> Optional[UserAccount]:
+    if not credentials:
+        return None
+    payload = decode_access_token(credentials.credentials)
+    if not payload or payload.get("type") != "access":
+        return None
+    try:
+        user_id = UUID(str(payload["sub"]))
+        session_id = UUID(str(payload["sid"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    now = datetime.now(timezone.utc)
+    session = (
+        db.query(UserSession)
+        .filter(
+            UserSession.session_id == session_id,
+            UserSession.user_id == user_id,
+            UserSession.is_revoked.is_(False),
+            UserSession.expires_at > now,
+        )
+        .first()
+    )
+    if not session:
+        return None
+    return db.query(UserAccount).filter(UserAccount.user_id == user_id).first()
 
 
 def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> Optional[UserAccount]:
-    if not credentials:
-        return None
-    payload = decode_access_token(credentials.credentials)
-    if not payload or payload.get("type") == "mfa_challenge":
-        return None
-    user_id = payload.get("sub")
-    if not user_id:
-        return None
-    user = db.query(UserAccount).filter(UserAccount.user_id == user_id).first()
-    if not user or user.status != "active":
+    user = _session_user(credentials, db)
+    if not user or user.status != "active" or not user.is_verified:
         return None
     return user
 
@@ -124,30 +143,27 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials were not provided.",
         )
-    payload = decode_access_token(credentials.credentials)
-    if not payload:
+    user = _session_user(credentials, db)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token.",
         )
-    if payload.get("type") == "mfa_challenge":
+    payload = decode_access_token(credentials.credentials)
+    if not payload or payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="MFA verification required before accessing this resource.",
+            detail="Invalid or expired authentication token.",
         )
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Malformed token payload.",
-        )
-    user = db.query(UserAccount).filter(UserAccount.user_id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account does not exist.")
     if user.status != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated or suspended.",
+        )
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email verification is required before accessing this resource.",
         )
     return user
 
@@ -180,7 +196,7 @@ def require_role(allowed_roles: List[str]):
             return current_user
         if user_roles & allowed:
             return current_user
-        if "admin" in allowed and (user_roles & ADMIN_ROLE_NAMES or "admin" in user_roles):
+        if "admin" in allowed and user_roles & ADMIN_ROLE_NAMES:
             return current_user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -195,7 +211,7 @@ def require_admin(
     db: Session = Depends(get_db),
 ) -> UserAccount:
     user_roles = get_user_role_names(current_user, db)
-    if "admin" in user_roles or (user_roles & ADMIN_ROLE_NAMES):
+    if user_roles & ADMIN_ROLE_NAMES:
         return current_user
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

@@ -122,15 +122,6 @@ def activate_user_subscription(
         )
     )
 
-    # Do not overwrite admin tier
-    if user.account_tier != "admin":
-        if "creator" in plan.name.lower():
-            user.account_tier = "creator"
-        elif "business" in plan.name.lower():
-            user.account_tier = "business"
-        elif float(plan.price) > 0:
-            user.account_tier = "premium"
-
     db.add(
         Notification(
             user_id=user.user_id,

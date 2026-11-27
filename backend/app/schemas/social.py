@@ -1,14 +1,18 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CommentCreate(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=2000)
     post_id: Optional[UUID] = None
     recipe_id: Optional[UUID] = None
     parent_comment_id: Optional[UUID] = None
+
+
+class CommentUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
 
 
 class CommentResponse(BaseModel):
@@ -26,21 +30,31 @@ class CommentResponse(BaseModel):
 class PostMediaSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    media_url: str
-    media_type: str = "image"
-    sort_order: int = 0
+    media_url: str = Field(min_length=1, max_length=2048)
+    media_type: Literal["image", "video"] = "image"
+    sort_order: int = Field(default=0, ge=0, le=10)
 
 
 class PostCreate(BaseModel):
-    caption: Optional[str] = None
+    caption: Optional[str] = Field(default=None, max_length=2000)
     recipe_id: Optional[UUID] = None
-    dish_name: Optional[str] = None
-    technique: Optional[str] = None
-    restaurant_tag: Optional[str] = None
-    ingredient_tags: List[str] = []
-    hashtags: List[str] = []
+    dish_name: Optional[str] = Field(default=None, max_length=120)
+    technique: Optional[str] = Field(default=None, max_length=120)
+    restaurant_tag: Optional[str] = Field(default=None, max_length=120)
+    ingredient_tags: List[str] = Field(default_factory=list, max_length=30)
+    hashtags: List[str] = Field(default_factory=list, max_length=30)
     is_cooked_this: bool = False
-    media: List[PostMediaSchema] = []
+    media: List[PostMediaSchema] = Field(default_factory=list, max_length=10)
+
+
+class PostUpdate(BaseModel):
+    caption: Optional[str] = Field(default=None, max_length=2000)
+    dish_name: Optional[str] = Field(default=None, max_length=120)
+    technique: Optional[str] = Field(default=None, max_length=120)
+    restaurant_tag: Optional[str] = Field(default=None, max_length=120)
+    ingredient_tags: Optional[List[str]] = Field(default=None, max_length=30)
+    hashtags: Optional[List[str]] = Field(default=None, max_length=30)
+    is_cooked_this: Optional[bool] = None
 
 
 class PostResponse(BaseModel):
@@ -64,6 +78,7 @@ class PostResponse(BaseModel):
     is_cooked_this: bool = False
     likes_count: int = 0
     comments_count: int = 0
+    shares_count: int = 0
     has_liked: bool = False
     has_saved: bool = False
     media: List[PostMediaSchema] = []
@@ -113,6 +128,6 @@ class BlogResponse(BaseModel):
 
 
 class ReportCreate(BaseModel):
-    target_type: str
+    target_type: Literal["recipe", "post", "comment", "user", "ai_output", "reel", "blog", "restaurant"]
     target_id: UUID
-    reason: str
+    reason: str = Field(min_length=5, max_length=2000)

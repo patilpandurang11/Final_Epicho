@@ -1,24 +1,10 @@
 import type { Metadata } from "next";
-import { Karla, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
-
-const karla = Karla({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-karla",
-  display: "swap",
-});
-
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  variable: "--font-playfair",
-  display: "swap",
-});
+import { AuthGuard } from "@/components/auth/AuthGuard";
 
 export const metadata: Metadata = {
   title: "EpiCho — Discover. Create. Cook. Connect.",
@@ -32,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${karla.variable} ${playfair.variable}`} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen flex flex-col bg-[#FDFBF7] dark:bg-[#0D1511] text-[#0F172A] dark:text-[#F4F1EA] selection:bg-[#9A3412] selection:text-white transition-colors duration-200">
         <a
           href="#main-content"
@@ -44,7 +30,7 @@ export default function RootLayout({
           <AuthProvider>
             <Navbar />
             <main id="main-content" className="flex-1">
-              {children}
+              <AuthGuard>{children}</AuthGuard>
             </main>
             <Footer />
           </AuthProvider>

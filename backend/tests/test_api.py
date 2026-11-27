@@ -1,8 +1,12 @@
 import uuid
+import secrets
+import time
+from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 from app.main import app
-from app.core.security import _totp_at
-import time
+from app.core.database import SessionLocal
+from app.core.security import _totp_at, get_password_hash
+from app.models.user import AuthUser, Role, UserAccount
 
 client = TestClient(app)
 
@@ -60,9 +64,14 @@ def test_ai_kitchen_allergen_sanitization_and_translation():
     assert "[हिन्दी अनुवाद]" in tr.json()["title"]
 
 
-def test_register_login_and_rbac_enforcement():
+def test_register_login_and_rbac_enforcement(monkeypatch):
     uid = str(uuid.uuid4())[:8]
     email = f"chef_{uid}@example.com"
+    sent_emails = []
+    monkeypatch.setattr(
+        "app.api.v1.auth.send_action_email",
+        lambda recipient, subject, url: sent_emails.append((recipient, subject, url)),
+    )
     reg = client.post(
         "/api/v1/auth/register",
         json={
@@ -73,8 +82,21 @@ def test_register_login_and_rbac_enforcement():
             "diet_preference": "veg",
         },
     )
-    assert reg.status_code == 200
-    token = reg.json()["access_token"]
+    assert reg.status_code == 201
+    assert "access_token" not in reg.json()
+    verification_token = parse_qs(urlparse(sent_emails[0][2]).query)["token"][0]
+    verified = client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": verification_token},
+    )
+    assert verified.status_code == 200
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "StrongPassword123!"},
+    )
+    assert login.status_code == 200
+    token = login.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
     # Standard user cannot access admin stats
@@ -114,9 +136,35 @@ def test_register_login_and_rbac_enforcement():
 
 
 def test_totp_mfa_flow_and_admin_suite():
+    email = f"admin_{uuid.uuid4().hex}@example.com"
+    password = secrets.token_urlsafe(24)
+    user_id = uuid.uuid4()
+    with SessionLocal() as db:
+        role = db.query(Role).filter(Role.role_name == "super_admin").one()
+        db.add(
+            AuthUser(
+                id=user_id,
+                email=email,
+                encrypted_password=get_password_hash(password),
+            )
+        )
+        db.add(
+            UserAccount(
+                user_id=user_id,
+                full_name="Test Administrator",
+                username=f"admin_{uuid.uuid4().hex}",
+                email=email,
+                role_id=role.role_id,
+                account_tier="admin",
+                status="active",
+                is_verified=True,
+            )
+        )
+        db.commit()
+
     login_resp = client.post(
         "/api/v1/auth/admin-login",
-        json={"email": "admin@epicho.com", "password": "AdminSecret123!"},
+        json={"email": email, "password": password},
     )
     assert login_resp.status_code == 200
     token = login_resp.json()["access_token"]

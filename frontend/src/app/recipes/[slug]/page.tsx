@@ -31,9 +31,17 @@ export default function RecipeDetailPage() {
   const [recipe, setRecipe] = useState<any>(null);
   const [versions, setVersions] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [replyTo, setReplyTo] = useState<any>(null);
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [adjustedServings, setAdjustedServings] = useState<number | null>(null);
+  const [adjustedIngredients, setAdjustedIngredients] = useState<any[] | null>(null);
+  const [collections, setCollections] = useState<any[]>([]);
+  const [collectionId, setCollectionId] = useState("");
+  const [collectionFeedback, setCollectionFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug) return;
@@ -41,6 +49,12 @@ export default function RecipeDetailPage() {
       setRecipe(r);
       apiRequest(`/recipes/${r.recipe_id}/versions`).then(setVersions).catch(() => {});
       apiRequest(`/recipes/${r.recipe_id}/reviews`).then(setReviews).catch(() => {});
+      apiRequest(`/recipes/${r.recipe_id}/comments`).then(setComments).catch(() => {});
+      if (user) {
+        apiRequest("/posts/collections")
+          .then(setCollections)
+          .catch(() => setCollections([]));
+      }
     }).catch(() => {});
   }, [slug]);
 
@@ -86,6 +100,48 @@ export default function RecipeDetailPage() {
     setReviewText("");
     const updated = await apiRequest(`/recipes/${recipe.recipe_id}/reviews`);
     setReviews(updated);
+  };
+
+  const handleSubmitComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return router.push("/login");
+    await apiRequest(`/recipes/${recipe.recipe_id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content: commentText, parent_comment_id: replyTo?.comment_id || null }),
+    });
+    setCommentText("");
+    setReplyTo(null);
+    setComments(await apiRequest(`/recipes/${recipe.recipe_id}/comments`));
+  };
+
+  const handleAdjustServings = async (servings: number) => {
+    if (!recipe || servings < 1) return;
+    try {
+      const adjusted = await apiRequest(
+        `/recipes/${recipe.recipe_id}/adjust-servings?servings=${servings}`,
+      );
+      setAdjustedServings(adjusted.adjusted_servings);
+      setAdjustedIngredients(adjusted.ingredients);
+    } catch (error: any) {
+      setFeedback(error.message);
+    }
+  };
+
+  const handleReviewFeedback = async (reviewId: string, helpful: boolean) => {
+    if (!user) return router.push("/login");
+    try {
+      const result = await apiRequest(
+        `/recipes/${recipe.recipe_id}/reviews/${reviewId}/feedback?helpful=${helpful}`,
+        { method: "POST" },
+      );
+      setReviews((items) => items.map((item) =>
+        item.review_id === reviewId
+          ? { ...item, helpful_count: result.helpful_count, unhelpful_count: result.unhelpful_count }
+          : item
+      ));
+    } catch (error: any) {
+      setFeedback(error.message);
+    }
   };
 
   if (!recipe) {
@@ -170,10 +226,31 @@ export default function RecipeDetailPage() {
             <CardTitle>Ingredients</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2.5">
-            {recipe.ingredients?.map((ing: any, i: number) => (
+            <div className="flex flex-wrap items-center gap-2 pb-2">
+              <span className="text-xs font-bold">Adjust servings:</span>
+              {[1, 2, 4, 6, 8].map((count) => (
+                <Button
+                  key={count}
+                  type="button"
+                  size="sm"
+                  variant={adjustedServings === count ? "emerald" : "outline"}
+                  onClick={() => handleAdjustServings(count)}
+                >
+                  {count}
+                </Button>
+              ))}
+            </div>
+            {adjustedIngredients && (
+              <p className="text-xs text-amber-700">
+                Estimated quantities for {adjustedServings} servings. Exact scaling may require culinary judgment.
+              </p>
+            )}
+            {(adjustedIngredients || recipe.ingredients)?.map((ing: any, i: number) => (
               <div key={i} className="flex justify-between text-sm py-1.5 border-b border-[#E7DFD3]/60 dark:border-[#253D31]">
                 <span className="font-medium">{ing.ingredient_name}</span>
-                <span className="text-xs font-bold text-[#475569]">{ing.quantity} {ing.unit}</span>
+                <span className="text-xs font-bold text-[#475569]">
+                  {ing.quantity} {ing.unit}
+                </span>
               </div>
             ))}
           </CardContent>
@@ -218,6 +295,26 @@ export default function RecipeDetailPage() {
       )}
 
       <Card>
+          <CardHeader><CardTitle>Recipe discussion ({comments.length})</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              {comments.map((comment) => (
+                <div key={comment.comment_id} className={`rounded-xl bg-[#F5F0E6]/60 dark:bg-[#1A2D24] p-3 ${comment.parent_comment_id ? "ml-6" : ""}`}>
+                  <p className="text-xs font-bold">{comment.author_name}</p>
+                  <p className="text-sm">{comment.content}</p>
+                  <button type="button" onClick={() => setReplyTo(comment)} className="mt-1 text-xs font-semibold text-[#9A3412]">Reply</button>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleSubmitComment} className="space-y-2">
+              {replyTo && <button type="button" onClick={() => setReplyTo(null)} className="text-xs text-stone-500">Replying to {replyTo.author_name} · cancel</button>}
+              <Textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} required placeholder={replyTo ? "Write a reply…" : "Join the recipe discussion…"} />
+              <Button type="submit" variant="primary" size="sm">Post Comment</Button>
+            </form>
+          </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Star className="w-5 h-5 text-amber-500" /> Ratings & Community Reviews ({reviews.length})
@@ -254,6 +351,24 @@ export default function RecipeDetailPage() {
                   <span className="text-amber-600">{rv.rating} / 5</span>
                 </div>
                 <p className="text-sm text-[#475569] dark:text-[#A7B8AE]">{rv.comment}</p>
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleReviewFeedback(rv.review_id, true)}
+                  >
+                    Helpful ({rv.helpful_count || 0})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleReviewFeedback(rv.review_id, false)}
+                  >
+                    Not helpful ({rv.unhelpful_count || 0})
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

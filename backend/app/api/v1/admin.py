@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, func
@@ -18,9 +18,9 @@ from app.core.rbac import (
 from app.models.admin import AuditLog, ModerationReport, Notification, SupportTicket, SystemConfig
 from app.models.business import BusinessProfile, NutritionistProfile, VerificationRequest
 from app.models.discovery import HiddenGem
-from app.models.recipe import AIRequest, Recipe
+from app.models.recipe import AIRequest, Recipe, RecipeReview
 from app.models.reels import Reel
-from app.models.social import Post
+from app.models.social import Comment, Post
 from app.models.subscription import Payment, Subscription, SubscriptionPlan
 from app.models.user import Role, UserAccount, UserRole
 from app.schemas.business import VerificationSubmitRequest
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/admin", tags=["Admin Dashboard & Staff Governance"])
 
 
 class ModerationActionRequest(BaseModel):
-    action: str  # dismiss, remove_content, warn_author
+    action: Literal["dismiss", "remove_content", "warn_author"]
     resolution_notes: Optional[str] = "Reviewed by EpiCho Moderation Staff."
 
 
@@ -234,6 +234,16 @@ def act_on_moderation_report(
             rec = db.query(Recipe).filter(Recipe.recipe_id == rep.recipe_id).first()
             if rec:
                 rec.moderation_status = "removed"
+        elif rep.target_type == "recipe" and rep.target_id:
+            review = db.query(RecipeReview).filter(
+                RecipeReview.review_id == rep.target_id
+            ).first()
+            if review:
+                review.moderation_status = "removed"
+            else:
+                rec = db.query(Recipe).filter(Recipe.recipe_id == rep.target_id).first()
+                if rec:
+                    rec.moderation_status = "removed"
         elif rep.target_type == "reel" and rep.target_id:
             rl = db.query(Reel).filter(Reel.reel_id == rep.target_id).first()
             if rl:
@@ -242,6 +252,30 @@ def act_on_moderation_report(
             ps = db.query(Post).filter(Post.post_id == rep.target_id).first()
             if ps:
                 ps.moderation_status = "removed"
+        elif rep.target_type == "recipe" and rep.target_id:
+            review = db.query(RecipeReview).filter(
+                RecipeReview.review_id == rep.target_id
+            ).first()
+            if review:
+                review.moderation_status = "removed"
+        elif rep.target_type == "comment" and rep.target_id:
+            comment = db.query(Comment).filter(Comment.comment_id == rep.target_id).first()
+            if comment:
+                db.delete(comment)
+        elif rep.target_type == "user" and rep.target_id:
+            reported_user = db.query(UserAccount).filter(
+                UserAccount.user_id == rep.target_id
+            ).first()
+            if reported_user and reported_user.user_id != admin.user_id:
+                reported_user.status = "suspended"
+                _log_audit(
+                    db,
+                    admin,
+                    "user.status.suspended",
+                    "user_accounts",
+                    reported_user.user_id,
+                    {"source_report_id": str(report_id)},
+                )
 
     _log_audit(db, admin, f"moderation.{req.action}", "moderation_reports", report_id, {"notes": req.resolution_notes})
     db.commit()

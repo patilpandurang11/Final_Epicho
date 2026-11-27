@@ -126,7 +126,7 @@ def get_subscription_status(
             has_active_subscription=True,
             subscription_id=sub.subscription_id,
             plan_name=plan.name if plan else "EpiCho Premium",
-            tier=current_user.account_tier,
+            tier="premium",
             billing_cycle=sub.billing_cycle or "monthly",
             end_date=sub.end_date,
             ai_limit_per_day=9999,
@@ -142,7 +142,7 @@ def get_subscription_status(
     return SubscriptionStatusResponse(
         has_active_subscription=False,
         plan_name="Free Plan",
-        tier=current_user.account_tier or "registered",
+        tier="registered",
         billing_cycle="monthly",
         end_date=None,
         ai_limit_per_day=10,
@@ -256,8 +256,6 @@ def cancel_subscription(
             notes="Cancelled by user via subscription portal.",
         )
     )
-    if current_user.account_tier != "admin":
-        current_user.account_tier = "registered"
     db.commit()
     return {"message": "Subscription cancelled. Account reverted to Free Plan."}
 

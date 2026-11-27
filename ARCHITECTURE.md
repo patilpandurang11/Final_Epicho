@@ -21,7 +21,7 @@ EpiCho is a full-stack, AI-powered culinary social networking platform built on 
 │                      API & Orchestration Layer (FastAPI)                   │
 │  • Pydantic v2 Validation & Structured JSON AI Output Guardrails           │
 │  • JWT Auth + TOTP MFA (Admins) + Fine-Grained Permission RBAC             │
-│  • Services: AI Kitchen (Gemini + Fallback), Nutrition DB, Allergen Guard, │
+│  • Services: AI Kitchen (Gemini / Mock provider), Nutrition DB, Allergen Guard, │
 │    Bayesian Rankings, Hidden Gems Scheduler, Razorpay Webhooks & Invoices  │
 └──────────────┬──────────────────────────────────┬──────────────────────────┘
                │ SQLAlchemy 2.0 + Alembic         │ Redis / In-Memory Fallback
@@ -37,7 +37,7 @@ EpiCho is a full-stack, AI-powered culinary social networking platform built on 
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                  Media & External Integrations Layer                       │
 │  • Local Storage (/uploads) or S3 / Cloudflare R2 / Cloudinary CDN         │
-│  • Google Gemini API (Structured Recipe Generation & Video Extraction)     │
+│  • Optional Google Gemini API (Structured Recipe Generation & Video Extraction) │
 │  • Razorpay / Cashfree (Checkout + HMAC Signature & Webhook Verification)  │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -65,11 +65,13 @@ All persistent entities live in PostgreSQL (`auth` and `public` schemas) managed
    - `public.recipes` → `public.recipe_ingredients` ↔ `public.ingredients`
    - `public.recipes` → `public.recipe_steps`, `public.recipe_nutrition`, `public.recipe_reviews`, `public.recipe_versions`
    - `public.recipes.parent_recipe_id` (self-referencing FK for recipe remixing with attribution)
-   - `public.saves` (saved recipes)
+   - `public.saves` (saved recipes), `public.post_saves` (saved posts), `public.post_shares` (share events), `public.saved_collections` → `public.collection_items`
 
 4. **Social Network, Reels & Blogs**
-   - `public.posts` (supports `is_cooked_this`, `recipe_id`, `hashtags`, `dish_name`, `technique`) → `public.post_media`
-   - `public.comments` (`post_id`, `recipe_id`, `parent_comment_id` for nested replies), `public.likes`, `public.follows`
+   - `public.posts` (supports `is_cooked_this`, `recipe_id`, `hashtags`, `dish_name`, `technique`) → `public.post_media`; posts and comments are author-editable/deletable with nested replies.
+   - `public.user_profiles.is_private` gates profile recipes and posts; public profile fields include cover image, cuisine interests, website, and social links. `public.follows.status` distinguishes accepted follows from pending requests.
+   - Partial unique indexes prevent duplicate post/recipe likes; collection targets and recipe reviews are unique per owner/user and target. Review helpful/unhelpful votes use `public.review_feedback` with a unique user/review constraint. Review verification requires an approved Cooked-This post linked to the recipe with media.
+   - Recipes support category, allergen tags, and published/draft visibility.
    - `public.reels` (`video_url`, `thumbnail_url`, `recipe_id`, `category`) → `public.reel_likes`, `public.reel_comments`, `public.reel_views`, `public.reel_saves`
    - `public.blog_posts` (draft/published status, categories, tags, `embedded_recipe_ids`)
 
@@ -168,7 +170,7 @@ FINAL_EPICHO/
 ## 5. Phased Implementation Roadmap
 
 1. **Phase 1 — Foundation & Auth**: PostgreSQL schema alignment, Alembic migrations, multi-role RBAC + permission identifiers, admin TOTP MFA & invitations, Redis/in-memory cache.
-2. **Phase 2 — AI Kitchen**: Gemini structured JSON + culinary fallback, USDA/ICMR-backed Nutrition Lab calculator, post-generation Allergen Guard, daily quotas, history, translation, unsafe output reporting.
+2. **Phase 2 — AI Kitchen**: Optional Gemini structured JSON or deterministic mock provider behind a common interface, USDA/ICMR-backed Nutrition Lab calculator, independent post-generation Allergen Guard, daily quotas, history, translation, unsafe output reporting. Provider failures are explicit and never silently fall back to mock output.
 3. **Phase 3 — Social, Reels, Recipes & Blogs**: Full recipe CRUD + versioning + remixing, Cooked-This social posts + nested replies + media uploads, 9:16 Reels upload/view/save/extract-recipe, SEO Blogs with drafts & rich markdown.
 4. **Phase 4 — Planning, Grocery, Heritage, Restaurants, Rankings, Hidden Gems, Consultations & Notifications**: Daily/weekly/monthly meal planner + AI plan generation, category-grouped grocery list + pantry subtraction + shopping links, Heritage translations & colloquial measurements, Bayesian rankings + anti-fraud, Hidden Gems 2-day/monthly cycle + archive, Nutritionist availability + consent-based booking, full notifications center.
 5. **Phase 5 — Subscriptions & Administration**: Razorpay checkout + strict backend HMAC & webhook verification, invoice generation, upgrade/downgrade/cancel, all 9 admin dashboards + audit logs + verification workflows.

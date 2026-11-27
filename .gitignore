@@ -25,6 +25,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+!frontend/src/lib/
+!frontend/src/lib/**
 parts/
 sdist/
 var/
@@ -36,6 +38,7 @@ wheels/
 
 # Environment Variables
 .env
+.dev-email-outbox/
 .env.local
 .env.*.local
 
