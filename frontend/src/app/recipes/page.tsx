@@ -17,37 +17,68 @@ import { apiRequest } from "@/lib/api";
 const CUISINES = ["All", "Indian", "Italian", "Mexican", "Asian", "Mediterranean"];
 const DIETS = ["All", "veg", "vegan", "non_veg", "eggetarian"];
 
+type RecipeCard = {
+  recipe_id: string;
+  slug?: string;
+  title: string;
+  cuisine_type: string;
+  servings: number;
+  cook_time_mins?: number;
+  prep_time_mins?: number;
+  image_url?: string | null;
+  is_ai_generated?: boolean;
+  average_rating?: number | null;
+  review_count?: number;
+  description?: string | null;
+  difficulty_level?: string | null;
+};
+
+function requestRecipes(
+  search: string,
+  cuisine: string,
+  diet: string,
+  sort: string,
+): Promise<RecipeCard[]> {
+  const params = new URLSearchParams();
+  if (cuisine !== "All") params.append("cuisine", cuisine);
+  if (diet !== "All") params.append("diet", diet);
+  if (search) params.append("search", search);
+  params.append("sort", sort);
+  return apiRequest<RecipeCard[]>(`/recipes?${params.toString()}`);
+}
+
 export default function RecipesCatalogPage() {
-  const [recipes, setRecipes] = useState<any[]>([]);
+  const [recipes, setRecipes] = useState<RecipeCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [selectedCuisine, setSelectedCuisine] = useState("All");
   const [selectedDiet, setSelectedDiet] = useState("All");
-
-  const fetchRecipes = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (selectedCuisine !== "All") params.append("cuisine", selectedCuisine);
-      if (selectedDiet !== "All") params.append("diet", selectedDiet);
-      if (search) params.append("search", search);
-
-      const data = await apiRequest(`/recipes?${params.toString()}`);
-      setRecipes(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [sort, setSort] = useState("recent");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchRecipes();
-  }, [selectedCuisine, selectedDiet]);
+    let active = true;
+    requestRecipes(appliedSearch, selectedCuisine, selectedDiet, sort)
+      .then((data) => {
+        if (active) setRecipes(data);
+      })
+      .catch((err: Error) => {
+        if (active) setError(err.message || "Unable to load recipes.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [appliedSearch, selectedCuisine, selectedDiet, sort]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchRecipes();
+    setError(null);
+    setLoading(true);
+    setAppliedSearch(search);
   };
 
   return (
@@ -95,7 +126,11 @@ export default function RecipesCatalogPage() {
           {CUISINES.map((c) => (
             <button
               key={c}
-              onClick={() => setSelectedCuisine(c)}
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                setSelectedCuisine(c);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                 selectedCuisine === c
                   ? "bg-[#9A3412] text-white"
@@ -113,7 +148,11 @@ export default function RecipesCatalogPage() {
           {DIETS.map((d) => (
             <button
               key={d}
-              onClick={() => setSelectedDiet(d)}
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                setSelectedDiet(d);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
                 selectedDiet === d
                   ? "bg-[#059669] text-white"
@@ -124,11 +163,25 @@ export default function RecipesCatalogPage() {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-2 text-xs font-bold whitespace-nowrap">
+          Sort:
+          <select value={sort} onChange={(event) => {
+            setError(null);
+            setLoading(true);
+            setSort(event.target.value);
+          }} className="rounded-lg border border-stone-200 bg-white px-2 py-1.5">
+            <option value="recent">Newest</option>
+            <option value="popular">Most viewed</option>
+            <option value="rating">Top rated</option>
+          </select>
+        </label>
       </div>
 
       {/* Recipe Cards Grid */}
       {loading ? (
         <div className="text-center py-20 text-stone-400 font-medium">Loading delicious recipes...</div>
+      ) : error ? (
+        <p role="alert" className="text-center py-20 text-red-700">{error}</p>
       ) : recipes.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-3xl border border-[#F2E6E2] space-y-3">
           <UtensilsCrossed className="w-12 h-12 text-stone-300 mx-auto" />
@@ -171,6 +224,7 @@ export default function RecipesCatalogPage() {
                       {(rec.prep_time_mins || 15) + (rec.cook_time_mins || 20)} Mins
                     </span>
                     <span>{rec.servings} Servings</span>
+                    <span>{rec.average_rating ? `★ ${rec.average_rating} (${rec.review_count})` : "New"}</span>
                   </div>
 
                   <h3 className="font-extrabold text-[#0F172A] text-base group-hover:text-[#9A3412] transition-colors line-clamp-1">

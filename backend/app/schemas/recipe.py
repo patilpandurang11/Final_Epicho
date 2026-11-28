@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RecipeIngredientSchema(BaseModel):
@@ -14,20 +14,20 @@ class RecipeIngredientSchema(BaseModel):
 
 
 class RecipeIngredientCreate(BaseModel):
-    ingredient_name: str
-    quantity: float
-    unit: str
-    notes: Optional[str] = None
+    ingredient_name: str = Field(min_length=1, max_length=120)
+    quantity: float = Field(gt=0, le=10000)
+    unit: str = Field(min_length=1, max_length=40)
+    notes: Optional[str] = Field(default=None, max_length=500)
 
 
 class RecipeStepSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    step_number: int
-    instruction: str
-    timer_seconds: Optional[int] = None
-    tip: Optional[str] = None
-    common_mistake: Optional[str] = None
+    step_number: int = Field(ge=1, le=50)
+    instruction: str = Field(min_length=1, max_length=2000)
+    timer_seconds: Optional[int] = Field(default=None, ge=0, le=86400)
+    tip: Optional[str] = Field(default=None, max_length=500)
+    common_mistake: Optional[str] = Field(default=None, max_length=500)
 
 
 class RecipeNutritionSchema(BaseModel):
@@ -44,37 +44,43 @@ class RecipeNutritionSchema(BaseModel):
 
 
 class RecipeCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    cuisine_type: str = "Indian"
-    diet_type: str = "veg"
-    prep_time_mins: int = 15
-    cook_time_mins: int = 20
-    difficulty_level: str = "medium"
-    servings: int = 2
-    equipment_required: List[str] = []
-    image_url: Optional[str] = None
+    title: str = Field(min_length=1, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    cuisine_type: str = Field(default="Indian", min_length=1, max_length=80)
+    category: str = Field(default="Main Course", min_length=1, max_length=80)
+    allergen_tags: List[str] = Field(default_factory=list, max_length=30)
+    diet_type: Literal["veg", "non_veg", "vegan", "eggetarian", "jain"] = "veg"
+    prep_time_mins: int = Field(default=15, ge=0, le=1440)
+    cook_time_mins: int = Field(default=20, ge=0, le=1440)
+    difficulty_level: Literal["easy", "medium", "hard"] = "medium"
+    servings: int = Field(default=2, ge=1, le=30)
+    equipment_required: List[str] = Field(default_factory=list, max_length=20)
+    image_url: Optional[str] = Field(default=None, max_length=2048)
     is_ai_generated: bool = False
     is_premium: bool = False
-    ingredients: List[RecipeIngredientCreate] = []
-    steps: List[RecipeStepSchema] = []
+    is_published: bool = True
+    ingredients: List[RecipeIngredientCreate] = Field(min_length=1, max_length=100)
+    steps: List[RecipeStepSchema] = Field(min_length=1, max_length=50)
     nutrition: Optional[RecipeNutritionSchema] = None
 
 
 class RecipeUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    cuisine_type: Optional[str] = None
-    diet_type: Optional[str] = None
-    prep_time_mins: Optional[int] = None
-    cook_time_mins: Optional[int] = None
-    difficulty_level: Optional[str] = None
-    servings: Optional[int] = None
-    equipment_required: Optional[List[str]] = None
-    image_url: Optional[str] = None
-    change_summary: Optional[str] = "Updated recipe details"
-    ingredients: Optional[List[RecipeIngredientCreate]] = None
-    steps: Optional[List[RecipeStepSchema]] = None
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    cuisine_type: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    allergen_tags: Optional[List[str]] = Field(default=None, max_length=30)
+    is_published: Optional[bool] = None
+    diet_type: Optional[Literal["veg", "non_veg", "vegan", "eggetarian", "jain"]] = None
+    prep_time_mins: Optional[int] = Field(default=None, ge=0, le=1440)
+    cook_time_mins: Optional[int] = Field(default=None, ge=0, le=1440)
+    difficulty_level: Optional[Literal["easy", "medium", "hard"]] = None
+    servings: Optional[int] = Field(default=None, ge=1, le=30)
+    equipment_required: Optional[List[str]] = Field(default=None, max_length=20)
+    image_url: Optional[str] = Field(default=None, max_length=2048)
+    change_summary: Optional[str] = Field(default="Updated recipe details", max_length=500)
+    ingredients: Optional[List[RecipeIngredientCreate]] = Field(default=None, min_length=1, max_length=100)
+    steps: Optional[List[RecipeStepSchema]] = Field(default=None, min_length=1, max_length=50)
 
 
 class RecipeAuthorSchema(BaseModel):
@@ -97,6 +103,9 @@ class RecipeDetailResponse(BaseModel):
     slug: str
     description: Optional[str] = None
     cuisine_type: str
+    category: str = "Main Course"
+    allergen_tags: List[str] = []
+    is_published: bool = True
     diet_type: str
     prep_time_mins: int
     cook_time_mins: int
@@ -108,6 +117,8 @@ class RecipeDetailResponse(BaseModel):
     is_premium: bool
     parent_recipe_id: Optional[UUID] = None
     view_count: int
+    average_rating: float = 0.0
+    review_count: int = 0
     created_at: datetime
     ingredients: List[RecipeIngredientSchema] = []
     steps: List[RecipeStepSchema] = []
@@ -131,6 +142,6 @@ class RecipeRemixRequest(BaseModel):
 
 
 class RecipeReviewCreate(BaseModel):
-    rating: int
-    review_text: Optional[str] = None
-    cooked_image_url: Optional[str] = None
+    rating: int = Field(ge=1, le=5)
+    review_text: Optional[str] = Field(default=None, max_length=2000)
+    cooked_image_url: Optional[str] = Field(default=None, max_length=2048)

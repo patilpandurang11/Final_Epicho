@@ -1,28 +1,28 @@
 "use client";
 
 import React, { useState } from "react";
-import { Flame, Lock, Mail, User, ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+import { Flame } from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 
 export default function RegisterPage() {
-  const { login } = useAuth();
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [diet, setDiet] = useState("veg");
-  const [accountTier, setAccountTier] = useState("registered");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [canResend, setCanResend] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+    setNotice(null);
 
     try {
-      const res = await apiRequest("/auth/register", {
+      const res = await apiRequest<{ message: string; email: string }>("/auth/register", {
         method: "POST",
         body: JSON.stringify({
           full_name: fullName,
@@ -30,13 +30,30 @@ export default function RegisterPage() {
           email,
           password,
           diet_preference: diet,
-          account_tier: accountTier
-        })
+        }),
       });
-      login(res.access_token, res.user);
-      window.location.href = "/feed";
-    } catch (err: any) {
-      setError(err.message || "Failed to register account.");
+      setNotice(res.message);
+      setCanResend(true);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unable to create your account.";
+      setError(message);
+      if (message.includes("verification email")) setCanResend(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await apiRequest<{ message: string }>("/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setNotice(res.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unable to resend the verification link.");
     } finally {
       setIsLoading(false);
     }
@@ -54,8 +71,23 @@ export default function RegisterPage() {
         </div>
 
         {error && (
-          <div className="p-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold">
+          <div role="alert" className="p-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold">
             {error}
+          </div>
+        )}
+        {notice && (
+          <div role="status" className="p-3 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold">
+            {notice}
+            {canResend && (
+              <button
+                type="button"
+                disabled={isLoading || !email}
+                onClick={handleResendVerification}
+                className="ml-2 underline disabled:opacity-50"
+              >
+                Resend link
+              </button>
+            )}
           </div>
         )}
 
@@ -67,7 +99,10 @@ export default function RegisterPage() {
             <input
               type="text"
               required
-              placeholder="Pankaj Patil"
+              minLength={2}
+              maxLength={100}
+              autoComplete="name"
+              placeholder="Your full name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#9A3412]"
@@ -81,7 +116,11 @@ export default function RegisterPage() {
             <input
               type="text"
               required
-              placeholder="pankajcooks"
+              minLength={3}
+              maxLength={32}
+              pattern="[A-Za-z0-9_]+"
+              autoComplete="username"
+              placeholder="cooking_name"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#9A3412]"
@@ -95,7 +134,8 @@ export default function RegisterPage() {
             <input
               type="email"
               required
-              placeholder="pankaj@example.com"
+              autoComplete="email"
+              placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#9A3412]"
@@ -109,14 +149,20 @@ export default function RegisterPage() {
             <input
               type="password"
               required
-              placeholder="At least 8 characters"
+              minLength={12}
+              maxLength={72}
+              autoComplete="new-password"
+              placeholder="At least 12 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#9A3412]"
             />
+            <p className="mt-1 text-[11px] text-stone-500">
+              Use at least 12 characters, including a letter and a number.
+            </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
                 Diet Preference
@@ -130,21 +176,7 @@ export default function RegisterPage() {
                 <option value="vegan">Vegan</option>
                 <option value="non_veg">Non-Veg</option>
                 <option value="eggetarian">Eggetarian</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1">
-                Account Type
-              </label>
-              <select
-                value={accountTier}
-                onChange={(e) => setAccountTier(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs font-medium focus:outline-none"
-              >
-                <option value="registered">Home Cook</option>
-                <option value="creator">Food Creator</option>
-                <option value="business">Restaurant / Brand</option>
+                <option value="jain">Jain</option>
               </select>
             </div>
           </div>

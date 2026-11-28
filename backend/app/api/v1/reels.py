@@ -18,7 +18,8 @@ from app.core.rbac import (
 from app.models.admin import ModerationReport, Notification
 from app.models.recipe import Recipe
 from app.models.reels import Reel, ReelComment, ReelLike, ReelSave, ReelView
-from app.models.user import UserAccount
+from app.models.social import Follow
+from app.models.user import UserAccount, UserProfile
 from app.schemas.ai import AIKitchenGenerateRequest
 from app.schemas.reels import (
     ReelCommentCreate,
@@ -26,6 +27,7 @@ from app.schemas.reels import (
     ReelCreate,
     ReelExtractRecipeResponse,
     ReelResponse,
+    ReelUpdate,
 )
 from app.services.ai_kitchen import generate_ai_recipe
 
@@ -151,6 +153,22 @@ def _serialize_reel(r: Reel, current_user: Optional[UserAccount], db: Session) -
     )
 
 
+def _ensure_reel_visible(db: Session, reel: Reel, viewer: Optional[UserAccount]) -> None:
+    if reel.moderation_status != "approved" and (
+        not viewer or (reel.author_id != viewer.user_id and viewer.account_tier != "admin")
+    ):
+        raise HTTPException(status_code=404, detail="Reel not found.")
+    profile = db.query(UserProfile).filter(UserProfile.user_id == reel.author_id).first()
+    if profile and profile.is_private and (not viewer or viewer.user_id != reel.author_id):
+        accepted = viewer and db.query(Follow).filter(
+            Follow.follower_id == viewer.user_id,
+            Follow.following_id == reel.author_id,
+            Follow.status == "accepted",
+        ).first()
+        if not accepted:
+            raise HTTPException(status_code=404, detail="Reel not found.")
+
+
 @router.get("", response_model=List[ReelResponse])
 def get_reels(
     category: Optional[str] = None,
@@ -160,7 +178,21 @@ def get_reels(
     db: Session = Depends(get_db),
 ):
     ensure_seed_reels(db)
-    query = db.query(Reel).filter(Reel.moderation_status == "approved")
+    query = db.query(Reel).join(UserAccount, Reel.author_id == UserAccount.user_id).filter(
+        Reel.moderation_status == "approved"
+    )
+    private_users = db.query(UserProfile.user_id).filter(UserProfile.is_private.is_(True))
+    if current_user:
+        followed = db.query(Follow.following_id).filter(
+            Follow.follower_id == current_user.user_id, Follow.status == "accepted"
+        )
+        query = query.filter(
+            ~UserAccount.user_id.in_(private_users)
+            | (UserAccount.user_id == current_user.user_id)
+            | UserAccount.user_id.in_(followed)
+        )
+    else:
+        query = query.filter(~UserAccount.user_id.in_(private_users))
     if category and category != "All":
         query = query.filter(Reel.category == category)
     reels = query.order_by(desc(Reel.created_at)).offset(offset).limit(limit).all()
@@ -294,6 +326,25 @@ def delete_reel(
     return {"message": "Reel deleted."}
 
 
+@router.patch("/{reel_id}", response_model=ReelResponse)
+def update_reel(
+    reel_id: uuid.UUID,
+    req: ReelUpdate,
+    current_user: UserAccount = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
+    if not reel:
+        raise HTTPException(status_code=404, detail="Reel not found.")
+    if reel.author_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Only the creator can edit this reel.")
+    for field, value in req.model_dump(exclude_unset=True).items():
+        setattr(reel, field, value)
+    db.commit()
+    db.refresh(reel)
+    return _serialize_reel(reel, current_user, db)
+
+
 @router.post("/{reel_id}/like")
 def like_reel(
     reel_id: uuid.UUID,
@@ -303,6 +354,7 @@ def like_reel(
     reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
     if not reel:
         raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
     existing = db.query(ReelLike).filter(ReelLike.reel_id == reel_id, ReelLike.user_id == current_user.user_id).first()
     if existing:
         db.delete(existing)
@@ -326,6 +378,44 @@ def like_reel(
     return {"liked": True, "likes_count": reel.likes_count}
 
 
+@router.put("/{reel_id}/like")
+def set_reel_liked(
+    reel_id: uuid.UUID,
+    current_user: UserAccount = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
+    if not reel:
+        raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
+    if not db.query(ReelLike).filter(
+        ReelLike.reel_id == reel_id, ReelLike.user_id == current_user.user_id
+    ).first():
+        db.add(ReelLike(reel_id=reel_id, user_id=current_user.user_id))
+        reel.likes_count = (reel.likes_count or 0) + 1
+        db.commit()
+    return {"liked": True, "likes_count": reel.likes_count or 0}
+
+
+@router.delete("/{reel_id}/like")
+def set_reel_unliked(
+    reel_id: uuid.UUID,
+    current_user: UserAccount = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
+    if not reel:
+        raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
+    deleted = db.query(ReelLike).filter(
+        ReelLike.reel_id == reel_id, ReelLike.user_id == current_user.user_id
+    ).delete()
+    if deleted:
+        reel.likes_count = max(0, (reel.likes_count or 1) - 1)
+        db.commit()
+    return {"liked": False, "likes_count": reel.likes_count or 0}
+
+
 @router.post("/{reel_id}/save")
 def save_reel(
     reel_id: uuid.UUID,
@@ -335,6 +425,7 @@ def save_reel(
     reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
     if not reel:
         raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
     existing = db.query(ReelSave).filter(ReelSave.reel_id == reel_id, ReelSave.user_id == current_user.user_id).first()
     if existing:
         db.delete(existing)
@@ -358,6 +449,7 @@ def record_reel_view(
     reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
     if not reel:
         raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
     db.add(ReelView(reel_id=reel_id, user_id=current_user.user_id if current_user else None, watch_seconds=watch_seconds))
     reel.views_count = (reel.views_count or 0) + 1
     db.commit()
@@ -365,7 +457,15 @@ def record_reel_view(
 
 
 @router.get("/{reel_id}/comments", response_model=List[ReelCommentResponse])
-def get_reel_comments(reel_id: uuid.UUID, db: Session = Depends(get_db)):
+def get_reel_comments(
+    reel_id: uuid.UUID,
+    current_user: Optional[UserAccount] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
+    if not reel:
+        raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
     rows = db.query(ReelComment).filter(ReelComment.reel_id == reel_id).order_by(ReelComment.created_at.asc()).all()
     return [
         ReelCommentResponse(
@@ -391,6 +491,7 @@ def add_reel_comment(
     reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
     if not reel:
         raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
     c = ReelComment(reel_id=reel_id, user_id=current_user.user_id, body=req.body)
     db.add(c)
     reel.comments_count = (reel.comments_count or 0) + 1
@@ -407,6 +508,25 @@ def add_reel_comment(
     )
 
 
+@router.delete("/comments/{comment_id}")
+def delete_reel_comment(
+    comment_id: uuid.UUID,
+    current_user: UserAccount = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    comment = db.query(ReelComment).filter(ReelComment.comment_id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found.")
+    if comment.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Only the author can delete this comment.")
+    reel = db.query(Reel).filter(Reel.reel_id == comment.reel_id).first()
+    db.delete(comment)
+    if reel:
+        reel.comments_count = max(0, (reel.comments_count or 1) - 1)
+    db.commit()
+    return {"message": "Comment deleted."}
+
+
 @router.post("/{reel_id}/report")
 def report_reel(
     reel_id: uuid.UUID,
@@ -414,6 +534,10 @@ def report_reel(
     current_user: UserAccount = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
+    if not reel:
+        raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
     db.add(
         ModerationReport(
             reporter_id=current_user.user_id,
@@ -436,6 +560,7 @@ async def extract_recipe_from_reel(
     reel = db.query(Reel).filter(Reel.reel_id == reel_id).first()
     if not reel:
         raise HTTPException(status_code=404, detail="Reel not found.")
+    _ensure_reel_visible(db, reel, current_user)
 
     keywords = [w.strip("#.,!") for w in (reel.title + " " + (reel.caption or "")).split() if len(w) > 4][:5]
     ai_req = AIKitchenGenerateRequest(

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { 
   Sparkles, 
   Flame, 
@@ -53,11 +53,15 @@ const EQUIPMENT_OPTIONS = [
 
 export default function AIKitchenPage() {
   const { user } = useAuth();
+  const [quota, setQuota] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
   
   // State
   const [ingredients, setIngredients] = useState<string[]>(["Paneer", "Tomatoes", "Onion", "Garlic"]);
+  const [excludedIngredients, setExcludedIngredients] = useState("");
   const [customInput, setCustomInput] = useState("");
   const [cuisine, setCuisine] = useState("Indian");
+  const [dishType, setDishType] = useState("Dinner");
   const [taste, setTaste] = useState("tangy & spicy");
   const [diet, setDiet] = useState("veg");
   const [servings, setServings] = useState(2);
@@ -71,6 +75,15 @@ export default function AIKitchenPage() {
   const [recipe, setRecipe] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<"ingredients" | "steps" | "nutrition">("ingredients");
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiRequest("/ai-kitchen/quota").then(setQuota).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (user) apiRequest("/ai-kitchen/history").then(setHistory).catch(() => setHistory([]));
+    else setHistory([]);
+  }, [user]);
 
   const addIngredient = (item: string) => {
     const trimmed = item.trim();
@@ -113,7 +126,9 @@ export default function AIKitchenPage() {
     try {
       const payload = {
         ingredients,
+        excluded_ingredients: excludedIngredients.split(",").map((item) => item.trim()).filter(Boolean),
         cuisine_preference: cuisine,
+        dish_type: dishType,
         taste_preference: taste,
         diet_preference: diet,
         servings,
@@ -147,6 +162,8 @@ export default function AIKitchenPage() {
           title: recipe.title,
           description: recipe.description,
           cuisine_type: recipe.cuisine_type,
+          category: recipe.category,
+          allergen_tags: recipe.allergen_warnings || [],
           diet_type: recipe.diet_type,
           prep_time_mins: recipe.prep_time_mins,
           cook_time_mins: recipe.cook_time_mins,
@@ -192,6 +209,34 @@ export default function AIKitchenPage() {
           Enter your pantry items, desired flavors, and dietary requirements. Our certified culinary engine creates exact, allergy-safe, step-by-step recipes with validated nutritional values.
         </p>
       </div>
+
+      <section className="rounded-2xl border border-[#F2E6E2] bg-white p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-bold text-sm">AI Kitchen usage</h2>
+          {quota && <p className="text-xs text-stone-600">{quota.tier}: {quota.is_unlimited ? "Unlimited" : `${quota.remaining} of ${quota.daily_limit} generations remaining today`}</p>}
+        </div>
+        {user && history.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-stone-600">Recent generations</h3>
+            <div className="flex flex-wrap gap-2">
+              {history.slice(0, 5).map((item) => (
+                <div key={item.request_id} className="flex items-center gap-2 rounded-lg bg-stone-50 px-3 py-2 text-xs">
+                  <span className="max-w-48 truncate">{item.recipe?.title || item.prompt}</span>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${item.recipe?.title || "generation"} from history`}
+                    onClick={async () => {
+                      await apiRequest(`/ai-kitchen/history/${item.request_id}`, { method: "DELETE" });
+                      setHistory((items) => items.filter((entry) => entry.request_id !== item.request_id));
+                    }}
+                    className="font-semibold text-red-700 hover:underline"
+                  >Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Generator Form (7 cols) */}
@@ -271,6 +316,20 @@ export default function AIKitchenPage() {
 
           {/* 2. Cuisine & Taste */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">
+                Dish Type
+              </label>
+              <select
+                value={dishType}
+                onChange={(e) => setDishType(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#9A3412]"
+              >
+                {["Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Beverage"].map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">
                 Primary Cuisine
@@ -401,6 +460,16 @@ export default function AIKitchenPage() {
 
           {/* 5. Allergens & Equipment */}
           <div className="space-y-3">
+            <label className="block text-xs font-bold uppercase tracking-wider text-stone-700">
+              Ingredients to Exclude
+            </label>
+            <input
+              type="text"
+              value={excludedIngredients}
+              onChange={(event) => setExcludedIngredients(event.target.value)}
+              placeholder="Separate ingredients with commas"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm"
+            />
             <label className="block text-xs font-bold uppercase tracking-wider text-stone-700">
               Allergens to Exclude (Strict Safety Filter)
             </label>

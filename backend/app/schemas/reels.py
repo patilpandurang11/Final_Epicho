@@ -1,19 +1,28 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReelCreate(BaseModel):
-    title: str
-    caption: Optional[str] = None
-    video_url: str
+    title: str = Field(min_length=1, max_length=160)
+    caption: Optional[str] = Field(default=None, max_length=2000)
+    video_url: str = Field(min_length=1, max_length=2048)
     thumbnail_url: Optional[str] = None
-    duration_seconds: int = 30
-    category: str = "Street Food"
+    duration_seconds: int = Field(default=30, ge=1, le=600)
+    category: str = Field(default="Street Food", min_length=1, max_length=80)
     hashtags: List[str] = []
     location: Optional[str] = None
     recipe_id: Optional[UUID] = None
+
+
+class ReelUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    caption: Optional[str] = Field(default=None, max_length=2000)
+    thumbnail_url: Optional[str] = Field(default=None, max_length=2048)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    hashtags: Optional[List[str]] = None
+    location: Optional[str] = Field(default=None, max_length=120)
 
 
 class ReelResponse(BaseModel):
@@ -46,7 +55,7 @@ class ReelResponse(BaseModel):
 
 
 class ReelCommentCreate(BaseModel):
-    body: str
+    body: str = Field(min_length=1, max_length=2000)
 
 
 class ReelCommentResponse(BaseModel):

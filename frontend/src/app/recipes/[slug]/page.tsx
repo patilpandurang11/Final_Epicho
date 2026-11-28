@@ -23,6 +23,16 @@ import {
   Users,
 } from "lucide-react";
 
+type SavedCollectionSummary = {
+  collection_id: string;
+  name: string;
+};
+
+type CollectionItemSummary = {
+  item_id: string;
+  recipe_id?: string | null;
+};
+
 export default function RecipeDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -31,22 +41,81 @@ export default function RecipeDetailPage() {
   const [recipe, setRecipe] = useState<any>(null);
   const [versions, setVersions] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [replyTo, setReplyTo] = useState<any>(null);
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackError, setFeedbackError] = useState(false);
+  const [adjustedServings, setAdjustedServings] = useState<number | null>(null);
+  const [adjustedIngredients, setAdjustedIngredients] = useState<any[] | null>(null);
+  const [collections, setCollections] = useState<SavedCollectionSummary[]>([]);
+  const [collectionId, setCollectionId] = useState("");
+  const [collectionFeedback, setCollectionFeedback] = useState<string | null>(null);
+  const [collectionFeedbackError, setCollectionFeedbackError] = useState(false);
+  const [collectionItemId, setCollectionItemId] = useState<string | null>(null);
+  const [collectionItemLoading, setCollectionItemLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reportingReviewId, setReportingReviewId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState("");
 
   useEffect(() => {
     if (!slug) return;
+    let active = true;
     apiRequest(`/recipes/${encodeURIComponent(slug)}`).then((r) => {
+      if (!active) return;
       setRecipe(r);
       apiRequest(`/recipes/${r.recipe_id}/versions`).then(setVersions).catch(() => {});
       apiRequest(`/recipes/${r.recipe_id}/reviews`).then(setReviews).catch(() => {});
-    }).catch(() => {});
-  }, [slug]);
+      apiRequest(`/recipes/${r.recipe_id}/comments`).then(setComments).catch(() => {});
+      if (user) {
+        apiRequest<SavedCollectionSummary[]>("/posts/collections")
+          .then(setCollections)
+          .catch((error: Error) => {
+            setCollectionFeedback(error.message);
+            setCollectionFeedbackError(true);
+          });
+      }
+    }).catch((error: Error) => {
+      if (active) setLoadError(error.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [slug, user]);
+
+  const currentRecipeId = recipe?.recipe_id;
+  useEffect(() => {
+    if (!collectionId || !currentRecipeId || !user) return;
+    let active = true;
+    apiRequest<CollectionItemSummary[]>(`/posts/collections/${collectionId}/items`)
+      .then((items) => {
+        if (!active) return;
+        const savedItem = items.find((item) => item.recipe_id === currentRecipeId);
+        setCollectionItemId(savedItem?.item_id ?? null);
+      })
+      .catch((error: Error) => {
+        if (active) {
+          setCollectionFeedback(error.message);
+          setCollectionFeedbackError(true);
+        }
+      })
+      .finally(() => {
+        if (active) setCollectionItemLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [collectionId, currentRecipeId, user]);
 
   const handleSave = async () => {
     if (!user) return router.push("/login");
     const res = await apiRequest(`/recipes/${recipe.recipe_id}/save`, { method: "POST" });
+    setFeedbackError(false);
     setFeedback(res.saved ? "Saved to your cookbook." : "Removed from saved recipes.");
   };
 
@@ -73,6 +142,7 @@ export default function RecipeDetailPage() {
   const handleAddToGrocery = async () => {
     if (!user) return router.push("/login");
     await apiRequest(`/grocery/from-recipe/${recipe.recipe_id}?servings=${recipe.servings}`, { method: "POST" });
+    setFeedbackError(false);
     setFeedback("Ingredients added to your Smart Grocery List!");
   };
 
@@ -88,8 +158,112 @@ export default function RecipeDetailPage() {
     setReviews(updated);
   };
 
-  if (!recipe) {
+  const handleSubmitComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return router.push("/login");
+    await apiRequest(`/recipes/${recipe.recipe_id}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content: commentText, parent_comment_id: replyTo?.comment_id || null }),
+    });
+    setCommentText("");
+    setReplyTo(null);
+    setComments(await apiRequest(`/recipes/${recipe.recipe_id}/comments`));
+  };
+
+  const handleAdjustServings = async (servings: number) => {
+    if (!recipe || servings < 1) return;
+    try {
+      const adjusted = await apiRequest(
+        `/recipes/${recipe.recipe_id}/adjust-servings?servings=${servings}`,
+      );
+      setAdjustedServings(adjusted.adjusted_servings);
+      setAdjustedIngredients(adjusted.ingredients);
+    } catch (error: any) {
+      setFeedback(error.message);
+      setFeedbackError(true);
+    }
+  };
+
+  const handleReviewFeedback = async (reviewId: string, helpful: boolean) => {
+    if (!user) return router.push("/login");
+    try {
+      const result = await apiRequest(
+        `/recipes/${recipe.recipe_id}/reviews/${reviewId}/feedback?helpful=${helpful}`,
+        { method: "POST" },
+      );
+      setReviews((items) => items.map((item) =>
+        item.review_id === reviewId
+          ? { ...item, helpful_count: result.helpful_count, unhelpful_count: result.unhelpful_count }
+          : item
+      ));
+    } catch (error: any) {
+      setFeedback(error.message);
+      setFeedbackError(true);
+    }
+  };
+
+  const handleCollectionItem = async () => {
+    if (!user) return router.push("/login");
+    if (!recipe || !collectionId) return;
+    setCollectionFeedback(null);
+    setCollectionFeedbackError(false);
+    try {
+      if (collectionItemId) {
+        await apiRequest(
+          `/posts/collections/${collectionId}/items/${collectionItemId}`,
+          { method: "DELETE" },
+        );
+        setCollectionItemId(null);
+        setCollectionFeedback("Recipe removed from the collection.");
+        return;
+      }
+      const result = await apiRequest(
+        `/posts/collections/${collectionId}/items`,
+        {
+          method: "POST",
+          body: JSON.stringify({ recipe_id: recipe.recipe_id }),
+        },
+      );
+      setCollectionItemId(result.item_id);
+      setCollectionFeedback(
+        result.already_saved
+          ? "This recipe is already in the selected collection."
+          : "Recipe added to the collection.",
+      );
+    } catch (error: any) {
+      setCollectionFeedback(error.message);
+      setCollectionFeedbackError(true);
+    }
+  };
+
+  const handleReportReview = async (event: React.FormEvent, reviewId: string) => {
+    event.preventDefault();
+    if (!user) return router.push("/login");
+    try {
+      await apiRequest(
+        `/recipes/${recipe.recipe_id}/reviews/${reviewId}/report?reason=${encodeURIComponent(reportReason)}`,
+        { method: "POST" },
+      );
+      setReportingReviewId(null);
+      setReportReason("");
+      setFeedbackError(false);
+      setFeedback("Review report submitted for moderation.");
+    } catch (error: any) {
+      setFeedback(error.message);
+      setFeedbackError(true);
+    }
+  };
+
+  if (loading) {
     return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-sm">Loading recipe details...</div>;
+  }
+
+  if (loadError) {
+    return <p role="alert" className="max-w-5xl mx-auto px-4 py-20 text-center text-sm text-red-700">{loadError}</p>;
+  }
+
+  if (!recipe) {
+    return <p role="alert" className="max-w-5xl mx-auto px-4 py-20 text-center text-sm">Recipe not found.</p>;
   }
 
   return (
@@ -116,9 +290,58 @@ export default function RecipeDetailPage() {
             </Button>
           </div>
           {feedback && (
-            <p className="text-xs font-semibold text-[#059669] bg-emerald-50 dark:bg-emerald-950/40 p-3 rounded-xl">
+            <p
+              role={feedbackError ? "alert" : "status"}
+              className={`text-xs font-semibold p-3 rounded-xl ${feedbackError ? "text-red-700 bg-red-50" : "text-[#059669] bg-emerald-50 dark:bg-emerald-950/40"}`}
+            >
               {feedback}
             </p>
+          )}
+          {user && (
+            <div className="space-y-2 rounded-xl border border-[#E7DFD3] p-3 dark:border-[#253D31]">
+              <label htmlFor="recipe-collection" className="text-xs font-bold">Save to collection</label>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  id="recipe-collection"
+                  aria-label="Select collection"
+                  value={collectionId}
+                  onChange={(event) => {
+                    const selectedId = event.target.value;
+                    setCollectionId(selectedId);
+                    setCollectionItemId(null);
+                    setCollectionItemLoading(Boolean(selectedId));
+                    setCollectionFeedback(null);
+                    setCollectionFeedbackError(false);
+                  }}
+                  className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Select a collection</option>
+                  {collections.map((collection) => (
+                    <option key={collection.collection_id} value={collection.collection_id}>
+                      {collection.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!collectionId || collectionItemLoading}
+                  onClick={handleCollectionItem}
+                >
+                  {collectionItemLoading ? "Checking..." : collectionItemId ? "Remove from collection" : "Add to collection"}
+                </Button>
+              </div>
+              {collectionFeedback && (
+                <p
+                  role={collectionFeedbackError ? "alert" : "status"}
+                  className={`text-xs ${collectionFeedbackError ? "text-red-700" : "text-emerald-800"}`}
+                >
+                  {collectionFeedback}
+                </p>
+              )}
+              {collections.length === 0 && <p className="text-xs text-stone-600">Create a collection from your profile first.</p>}
+            </div>
           )}
         </div>
 
@@ -170,10 +393,31 @@ export default function RecipeDetailPage() {
             <CardTitle>Ingredients</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2.5">
-            {recipe.ingredients?.map((ing: any, i: number) => (
+            <div className="flex flex-wrap items-center gap-2 pb-2">
+              <span className="text-xs font-bold">Adjust servings:</span>
+              {[1, 2, 4, 6, 8].map((count) => (
+                <Button
+                  key={count}
+                  type="button"
+                  size="sm"
+                  variant={adjustedServings === count ? "emerald" : "outline"}
+                  onClick={() => handleAdjustServings(count)}
+                >
+                  {count}
+                </Button>
+              ))}
+            </div>
+            {adjustedIngredients && (
+              <p className="text-xs text-amber-700">
+                Estimated quantities for {adjustedServings} servings. Exact scaling may require culinary judgment.
+              </p>
+            )}
+            {(adjustedIngredients || recipe.ingredients)?.map((ing: any, i: number) => (
               <div key={i} className="flex justify-between text-sm py-1.5 border-b border-[#E7DFD3]/60 dark:border-[#253D31]">
                 <span className="font-medium">{ing.ingredient_name}</span>
-                <span className="text-xs font-bold text-[#475569]">{ing.quantity} {ing.unit}</span>
+                <span className="text-xs font-bold text-[#475569]">
+                  {ing.quantity} {ing.unit}
+                </span>
               </div>
             ))}
           </CardContent>
@@ -218,6 +462,26 @@ export default function RecipeDetailPage() {
       )}
 
       <Card>
+          <CardHeader><CardTitle>Recipe discussion ({comments.length})</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              {comments.map((comment) => (
+                <div key={comment.comment_id} className={`rounded-xl bg-[#F5F0E6]/60 dark:bg-[#1A2D24] p-3 ${comment.parent_comment_id ? "ml-6" : ""}`}>
+                  <p className="text-xs font-bold">{comment.author_name}</p>
+                  <p className="text-sm">{comment.content}</p>
+                  <button type="button" onClick={() => setReplyTo(comment)} className="mt-1 text-xs font-semibold text-[#9A3412]">Reply</button>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleSubmitComment} className="space-y-2">
+              {replyTo && <button type="button" onClick={() => setReplyTo(null)} className="text-xs text-stone-500">Replying to {replyTo.author_name} · cancel</button>}
+              <Textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} required placeholder={replyTo ? "Write a reply…" : "Join the recipe discussion…"} />
+              <Button type="submit" variant="primary" size="sm">Post Comment</Button>
+            </form>
+          </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Star className="w-5 h-5 text-amber-500" /> Ratings & Community Reviews ({reviews.length})
@@ -254,6 +518,49 @@ export default function RecipeDetailPage() {
                   <span className="text-amber-600">{rv.rating} / 5</span>
                 </div>
                 <p className="text-sm text-[#475569] dark:text-[#A7B8AE]">{rv.comment}</p>
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleReviewFeedback(rv.review_id, true)}
+                  >
+                    Helpful ({rv.helpful_count || 0})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleReviewFeedback(rv.review_id, false)}
+                  >
+                    Not helpful ({rv.unhelpful_count || 0})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setReportingReviewId(reportingReviewId === rv.review_id ? null : rv.review_id);
+                      setReportReason("");
+                    }}
+                  >
+                    Report review
+                  </Button>
+                </div>
+                {reportingReviewId === rv.review_id && (
+                  <form onSubmit={(event) => handleReportReview(event, rv.review_id)} className="space-y-2 pt-2">
+                    <Textarea
+                      aria-label="Reason for reporting review"
+                      required
+                      minLength={5}
+                      maxLength={2000}
+                      value={reportReason}
+                      onChange={(event) => setReportReason(event.target.value)}
+                      placeholder="Explain why this review should be reviewed."
+                    />
+                    <Button type="submit" size="sm" variant="destructive">Submit report</Button>
+                  </form>
+                )}
               </div>
             ))}
           </div>

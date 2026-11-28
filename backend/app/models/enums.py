@@ -33,7 +33,7 @@ FulfillmentStatusEnum = ENUM(
     name="fulfillment_status", schema="public", create_type=False,
 )
 BusinessCategoryEnum = ENUM(
-    "Restaurant", "Nutritionist", "CulinaryExpert",
+    "Restaurant", "Nutritionist", "CulinaryExpert", "Chef", "FoodBrand",
     name="business_category", schema="public", create_type=False,
 )
 VerificationStatusEnum = ENUM(

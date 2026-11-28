@@ -1,13 +1,13 @@
 """EpiCho v2 schema alignment, new feature tables, enums, and role seeds.
 
 Revision ID: 0001_epicho_v2
-Revises:
+Revises: 0000_initial_schema
 Create Date: 2026-11-27 02:55:00
 """
 from alembic import op
 
 revision = "0001_epicho_v2"
-down_revision = None
+down_revision = "0000_initial_schema"
 branch_labels = None
 depends_on = None
 
@@ -179,26 +179,26 @@ def upgrade() -> None:
 
     # 4. Seed all 9 Admin roles + Critic role + Hidden Gems config
     op.execute("""
-        INSERT INTO public.roles (role_name, tier, description)
+        INSERT INTO public.roles (role_id, role_name, tier, description, status)
         VALUES
-            ('critic', 'creator', 'Verified Food Critic / Reviewer'),
-            ('super_admin', 'admin', 'Super Admin / Owner with full platform access'),
-            ('infra_admin', 'admin', 'Infrastructure Admin for servers, backups and security'),
-            ('tech_admin', 'admin', 'Technical Admin for deployments, AI config and error logs'),
-            ('content_moderator', 'admin', 'Content Moderator for posts, recipes, blogs and reels'),
-            ('verification_admin', 'admin', 'Verification Admin for creators, businesses, critics and nutritionists'),
-            ('ranking_admin', 'admin', 'Ranking Admin for Bayesian audits, fraud and Hidden Gems'),
-            ('finance_admin', 'admin', 'Finance Admin for subscriptions, invoices, refunds and payouts'),
-            ('customer_support', 'admin', 'Customer Support for user tickets'),
-            ('analytics_admin', 'admin', 'Analytics Admin for platform usage and business intelligence')
+            (gen_random_uuid(), 'critic', 'creator', 'Verified Food Critic / Reviewer', 'active'),
+            (gen_random_uuid(), 'super_admin', 'admin', 'Super Admin / Owner with full platform access', 'active'),
+            (gen_random_uuid(), 'infra_admin', 'admin', 'Infrastructure Admin for servers, backups and security', 'active'),
+            (gen_random_uuid(), 'tech_admin', 'admin', 'Technical Admin for deployments, AI config and error logs', 'active'),
+            (gen_random_uuid(), 'content_moderator', 'admin', 'Content Moderator for posts, recipes, blogs and reels', 'active'),
+            (gen_random_uuid(), 'verification_admin', 'admin', 'Verification Admin for creators, businesses, critics and nutritionists', 'active'),
+            (gen_random_uuid(), 'ranking_admin', 'admin', 'Ranking Admin for Bayesian audits, fraud and Hidden Gems', 'active'),
+            (gen_random_uuid(), 'finance_admin', 'admin', 'Finance Admin for subscriptions, invoices, refunds and payouts', 'active'),
+            (gen_random_uuid(), 'customer_support', 'admin', 'Customer Support for user tickets', 'active'),
+            (gen_random_uuid(), 'analytics_admin', 'admin', 'Analytics Admin for platform usage and business intelligence', 'active')
         ON CONFLICT (role_name) DO NOTHING;
 
-        INSERT INTO public.system_config (config_key, config_value)
+        INSERT INTO public.system_config (config_id, config_key, config_value)
         VALUES
-            ('hidden_gems_cycle_days', '2'),
-            ('hidden_gems_mode', 'two_days'),
-            ('ai_guest_daily_limit', '3'),
-            ('ai_registered_daily_limit', '10')
+            (gen_random_uuid(), 'hidden_gems_cycle_days', '2'),
+            (gen_random_uuid(), 'hidden_gems_mode', 'two_days'),
+            (gen_random_uuid(), 'ai_guest_daily_limit', '3'),
+            (gen_random_uuid(), 'ai_registered_daily_limit', '10')
         ON CONFLICT (config_key) DO NOTHING;
     """)
 

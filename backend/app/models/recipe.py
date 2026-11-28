@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Numeric, ForeignKey, Text, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Numeric, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -18,6 +18,8 @@ class Recipe(Base):
     slug = Column(String, unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
     cuisine_type = Column(String, nullable=False, default="Indian")
+    category = Column(String, nullable=False, default="Main Course")
+    allergen_tags = Column(ARRAY(String), default=[], nullable=False)
     diet_type = Column(DietTypeEnum, nullable=False, default="veg")
     prep_time_mins = Column(Integer, default=15, nullable=False)
     cook_time_mins = Column(Integer, default=20, nullable=False)
@@ -28,6 +30,7 @@ class Recipe(Base):
     moderation_status = Column(ModerationStatusEnum, default="approved", nullable=False)
     is_ai_generated = Column(Boolean, default=False, nullable=False)
     is_premium = Column(Boolean, default=False, nullable=False)
+    is_published = Column(Boolean, default=True, nullable=False)
     parent_recipe_id = Column(UUID(as_uuid=True), ForeignKey("public.recipes.recipe_id", ondelete="SET NULL"), nullable=True)
     view_count = Column(Integer, default=0, nullable=False)
     image_url = Column(String, default="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=1200&q=80")
@@ -41,6 +44,24 @@ class Recipe(Base):
     reviews = relationship("RecipeReview", back_populates="recipe", cascade="all, delete-orphan")
     heritage = relationship("HeritageRecipe", back_populates="recipe", uselist=False, cascade="all, delete-orphan")
     versions = relationship("RecipeVersion", back_populates="recipe", cascade="all, delete-orphan", order_by="RecipeVersion.version_number.desc()")
+
+    @property
+    def review_count(self) -> int:
+        return len({review.user_id for review in (self.reviews or [])})
+
+    @property
+    def average_rating(self) -> float:
+        latest = {}
+        for review in self.reviews or []:
+            previous = latest.get(review.user_id)
+            if previous is None or (
+                review.updated_at or review.created_at or datetime.min.replace(tzinfo=timezone.utc)
+            ) > (
+                previous.updated_at or previous.created_at or datetime.min.replace(tzinfo=timezone.utc)
+            ):
+                latest[review.user_id] = review
+        reviews = list(latest.values())
+        return round(sum(review.rating for review in reviews) / len(reviews), 2) if reviews else 0.0
 
 
 class RecipeIngredient(Base):
@@ -111,7 +132,10 @@ class RecipeNutrition(Base):
 
 class RecipeReview(Base):
     __tablename__ = "recipe_reviews"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        UniqueConstraint("user_id", "recipe_id", name="uq_recipe_reviews_user_recipe"),
+        {"schema": "public"},
+    )
 
     review_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     recipe_id = Column(UUID(as_uuid=True), ForeignKey("public.recipes.recipe_id", ondelete="CASCADE"), nullable=False)
@@ -121,9 +145,32 @@ class RecipeReview(Base):
     verified_cooked = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    moderation_status = Column(String, nullable=False, default="approved")
 
     recipe = relationship("Recipe", back_populates="reviews")
     user = relationship("UserAccount")
+
+
+class ReviewFeedback(Base):
+    __tablename__ = "review_feedback"
+    __table_args__ = (
+        UniqueConstraint("review_id", "user_id", name="uq_review_feedback_user_review"),
+        {"schema": "public"},
+    )
+
+    feedback_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.recipe_reviews.review_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.user_accounts.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    helpful = Column(Boolean, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class RecipeVersion(Base):
@@ -178,4 +225,5 @@ class AIRequest(Base):
     user_rating = Column(Integer, nullable=True)
     flagged_unsafe = Column(Boolean, nullable=False, default=False)
     unsafe_reason = Column(Text, nullable=True)
+    history_deleted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

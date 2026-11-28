@@ -89,6 +89,11 @@ class UserProfile(Base):
     profile_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("public.user_accounts.user_id", ondelete="CASCADE"), nullable=False, unique=True)
     bio = Column(Text, nullable=True)
+    is_private = Column(Boolean, default=False, nullable=False)
+    cover_image_url = Column(Text, nullable=True)
+    cuisine_interests = Column(ARRAY(String), default=[], nullable=False)
+    website_url = Column(Text, nullable=True)
+    social_links = Column(JSON, default=dict, nullable=False)
     diet_preference = Column(DietTypeEnum, nullable=True, default="veg")
     dietary_restrictions = Column(ARRAY(String), default=[], nullable=False)
     allergies_encrypted = Column(Text, nullable=True)
@@ -118,6 +123,23 @@ class UserSession(Base):
     ip_address = Column(String, nullable=True)
     is_revoked = Column(Boolean, default=False, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AuthActionToken(Base):
+    __tablename__ = "auth_action_tokens"
+    __table_args__ = {"schema": "public"}
+
+    token_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("public.user_accounts.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash = Column(Text, nullable=False, unique=True, index=True)
+    purpose = Column(String(32), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 

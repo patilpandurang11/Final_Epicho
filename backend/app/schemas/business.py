@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
@@ -27,7 +27,13 @@ class MenuItemResponse(BaseModel):
 
 class BusinessProfileCreate(BaseModel):
     business_name: str
-    business_type: str = "Restaurant"
+    business_type: Literal[
+        "Restaurant",
+        "Nutritionist",
+        "CulinaryExpert",
+        "Chef",
+        "FoodBrand",
+    ] = "Restaurant"
     address: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None

@@ -3,16 +3,24 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type AuthUser } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { KeyRound, ShieldCheck } from "lucide-react";
 
+interface AdminLoginResponse {
+  access_token: string;
+  refresh_token?: string | null;
+  mfa_required?: boolean;
+  mfa_challenge_token?: string | null;
+  user?: AuthUser | null;
+}
+
 export default function AdminLoginPage() {
   const router = useRouter();
   const { login } = useAuth();
-  const [email, setEmail] = useState("admin@epicho.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
@@ -24,7 +32,7 @@ export default function AdminLoginPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiRequest("/auth/admin-login", {
+      const res = await apiRequest<AdminLoginResponse>("/auth/admin-login", {
         method: "POST",
         body: JSON.stringify({ email, password, mfa_code: mfaCode || undefined }),
       });
@@ -32,10 +40,13 @@ export default function AdminLoginPage() {
         setChallengeToken(res.mfa_challenge_token);
         return;
       }
-      login(res.access_token, res.user);
+      if (!res.access_token || !res.refresh_token || !res.user) {
+        throw new Error("The authentication response was incomplete. Please try again.");
+      }
+      login(res.access_token, res.refresh_token, res.user);
       router.push("/admin/dashboard");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unable to sign in.");
     } finally {
       setLoading(false);
     }
@@ -46,14 +57,17 @@ export default function AdminLoginPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiRequest("/auth/mfa/verify", {
+      const res = await apiRequest<AdminLoginResponse>("/auth/mfa/verify", {
         method: "POST",
         body: JSON.stringify({ code: mfaCode, challenge_token: challengeToken }),
       });
-      login(res.access_token, res.user);
+      if (!res.access_token || !res.refresh_token || !res.user) {
+        throw new Error("The authentication response was incomplete. Please try again.");
+      }
+      login(res.access_token, res.refresh_token, res.user);
       router.push("/admin/dashboard");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unable to verify MFA.");
     } finally {
       setLoading(false);
     }
@@ -70,7 +84,7 @@ export default function AdminLoginPage() {
           <p className="text-xs text-[#475569]">Authorized governance access with MFA & audit logging</p>
         </CardHeader>
         <CardContent>
-          {error && <div className="mb-4 p-3 rounded-xl bg-red-50 text-red-700 text-xs font-semibold">{error}</div>}
+          {error && <div role="alert" className="mb-4 p-3 rounded-xl bg-red-50 text-red-700 text-xs font-semibold">{error}</div>}
           {!challengeToken ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
